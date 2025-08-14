@@ -5,6 +5,7 @@ import datetime
 import re
 import statistics
 import argparse
+import ipaddress
 import plotly.graph_objects as go
 
 # ----- CONFIG (defaults; can be overridden via CLI) -----
@@ -88,16 +89,56 @@ def get_gateway():
         pass
     return None
 
-def get_first_hop():
+def get_first_hop(gateway_ip: str | None = None):
+    """Return the first upstream hop beyond the gateway, preferring a public IP.
+
+    Falls back to the first hop not equal to the gateway if no public hop appears early.
+    """
     try:
-        output = subprocess.check_output(["tracert", "-d", "8.8.8.8"], text=True)
+        # Collect first few hops (up to 6) without reverse DNS
+        output = subprocess.check_output(["tracert", "-d", "-h", "6", "8.8.8.8"], text=True)
+        hops: list[str] = []
         for line in output.splitlines():
-            if re.search(r"\*", line):
-                # skip timeout-only hop lines
+            # Match hop lines starting with an index number
+            if re.match(r"^\s*\d+\s+", line):
+                ips = re.findall(r"\d+\.\d+\.\d+\.\d+", line)
+                if ips:
+                    hops.append(ips[-1])
+                else:
+                    hops.append("")
+
+        # Filter out empty entries
+        hops = [h for h in hops if h]
+        if not hops:
+            return None
+
+        # Helper to classify private/special addresses
+        def is_private_or_special(ip: str) -> bool:
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                return True
+            return (
+                addr.is_private
+                or addr.is_loopback
+                or addr.is_link_local
+                or addr.is_multicast
+                or addr.is_reserved
+                or addr.is_unspecified
+            )
+
+        # Prefer the first hop that is not the gateway and is public
+        for ip in hops:
+            if gateway_ip and ip == gateway_ip:
                 continue
-            m = re.search(r"(\d+\.\d+\.\d+\.\d+)", line)
-            if m:
-                return m.group(1)
+            if not is_private_or_special(ip):
+                return ip
+
+        # Fallback: first hop different from gateway (even if private)
+        for ip in hops:
+            if gateway_ip and ip == gateway_ip:
+                continue
+            return ip
     except Exception:
         pass
     return None
@@ -191,7 +232,7 @@ if __name__ == "__main__":
         PING_TIMEOUT_MS = args.timeout_ms
 
     gateway = get_gateway()
-    first_hop = get_first_hop()
+    first_hop = get_first_hop(gateway)
     google_dns = "8.8.8.8"
 
     print(f"Gateway: {gateway}")
