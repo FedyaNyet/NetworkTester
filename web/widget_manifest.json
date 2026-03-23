@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "name": "Network Monitor",
+  "description": "Real-time network latency and packet loss monitoring overlay",
+  "author": "NetworkTester",
+  "homepage": "http://localhost:8765",
+  "widget": {
+    "url": "http://localhost:8765/",
+    "width": 320,
+    "height": 280,
+    "resizable": true,
+    "transparent": true
+  },
+  "permissions": [
+    "localhost"
+  ]
+}

@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+    <!-- PWA Meta Tags for App-like Experience -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- Edge/IE Meta Tags -->
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="msapplication-tap-highlight" content="no">
+
+    <title>Network Monitor</title>
+
+    <!-- Web App Manifest -->
+    <link rel="manifest" href="/manifest.json">
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: rgba(0, 0, 0, 0.75);
+            color: #ffffff;
+            padding: 8px;
+            overflow: hidden;
+            user-select: none;
+            height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            height: 100%;
+            max-height: 100%;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #888;
+            margin-right: 4px;
+        }
+
+        .status-dot.connected {
+            background: #4CAF50;
+        }
+
+        .status-dot.disconnected {
+            background: #F44336;
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 10px;
+        }
+
+        .stats-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            font-size: 10px;
+            flex-shrink: 0;
+        }
+
+        .stat-item {
+            display: flex;
+            align-items: stretch;
+            gap: 6px;
+            position: relative;
+        }
+
+        .stat-color {
+            width: 3px;
+            border-radius: 2px;
+            align-self: stretch;
+        }
+
+        .stat-content {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .stat-color.gateway { background: #2196F3; }
+        .stat-color.first-hop { background: #4CAF50; }
+        .stat-color.google-dns { background: #FF9800; }
+
+        .stat-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .stat-label {
+            color: #aaa;
+            font-size: 8px;
+            line-height: 1;
+        }
+
+        .stat-value {
+            font-weight: 700;
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            line-height: 1.2;
+        }
+
+        .stat-value.good { color: #4CAF50; }
+        .stat-value.warning { color: #FF9800; }
+        .stat-value.critical { color: #F44336; }
+
+        .connection-status {
+            font-size: 8px;
+            color: #888;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .spike-tracker-compact {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .spike-label {
+            font-size: 7px;
+            color: #666;
+            font-weight: 600;
+            min-width: 16px;
+            text-align: right;
+        }
+
+        .spike-timer {
+            font-size: 8px;
+            color: #aaa;
+            font-family: 'Consolas', monospace;
+            min-width: 32px;
+        }
+
+        .spike-timer.warning {
+            color: #FF9800;
+            font-weight: 700;
+        }
+
+        .spike-progress {
+            width: 40px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .spike-progress-bar {
+            height: 100%;
+            background: #4CAF50 !important; /* Green when safe */
+            transition: width 0.5s ease, background 0.3s ease;
+            border-radius: 2px;
+            min-width: 2px; /* Ensure at least 2px visible */
+        }
+
+        .spike-progress-bar.approaching {
+            background: #FF9800 !important; /* Orange when getting close */
+        }
+
+        .spike-progress-bar.warning {
+            background: #F44336 !important; /* Red when imminent */
+            animation: progressPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes progressPulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+
+        .warning-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(244, 67, 54, 0.3);
+            pointer-events: none;
+            display: none;
+            animation: flashWarning 1s ease-in-out infinite;
+            z-index: 9999;
+        }
+
+        .warning-overlay.active {
+            display: block;
+        }
+
+        @keyframes flashWarning {
+            0%, 100% { opacity: 0.2; }
+            50% { opacity: 0.6; }
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 20px;
+            color: #888;
+            font-size: 11px;
+        }
+
+        .stats-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .mode-btn {
+            font-size: 7px;
+            font-weight: 700;
+            color: #666;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 3px;
+            padding: 2px 5px;
+            cursor: pointer;
+            letter-spacing: 0.5px;
+            line-height: 1.4;
+            transition: color 0.2s, border-color 0.2s;
+        }
+
+        .mode-btn:hover { color: #ccc; border-color: rgba(255,255,255,0.3); }
+        .mode-btn.report { color: #FF9800; border-color: rgba(255,152,0,0.4); }
+
+        .report-file-input {
+            display: none;
+            font-size: 8px;
+            color: #aaa;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 3px;
+            padding: 2px 4px;
+            cursor: pointer;
+            max-width: 120px;
+        }
+
+        .report-file-input::file-selector-button {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="chart-container">
+            <canvas id="latencyChart"></canvas>
+        </div>
+
+        <div class="stats-bar" id="stats">
+            <div class="stats-group">
+                <!-- Gateway -->
+                <div class="stat-item">
+                    <div class="stat-color gateway"></div>
+                    <div class="stat-content">
+                        <div class="stat-info">
+                            <div class="stat-label">Gateway</div>
+                            <div class="stat-value" id="gw-stat">--</div>
+                        </div>
+                        <div class="spike-tracker-compact">
+                            <div class="spike-progress" title="No prediction yet">
+                                <div class="spike-progress-bar" id="spike-progress-bar-gw" title="No prediction yet"></div>
+                            </div>
+                            <span class="spike-timer" id="spike-timer-gw">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- First Hop -->
+                <div class="stat-item">
+                    <div class="stat-color first-hop"></div>
+                    <div class="stat-content">
+                        <div class="stat-info">
+                            <div class="stat-label">First Hop</div>
+                            <div class="stat-value" id="fh-stat">--</div>
+                        </div>
+                        <div class="spike-tracker-compact">
+                            <div class="spike-progress" title="No prediction yet">
+                                <div class="spike-progress-bar" id="spike-progress-bar-fh" title="No prediction yet"></div>
+                            </div>
+                            <span class="spike-timer" id="spike-timer-fh">--</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Google DNS -->
+                <div class="stat-item">
+                    <div class="stat-color google-dns"></div>
+                    <div class="stat-content">
+                        <div class="stat-info">
+                            <div class="stat-label">Google DNS</div>
+                            <div class="stat-value" id="gd-stat">--</div>
+                        </div>
+                        <div class="spike-tracker-compact">
+                            <div class="spike-progress" title="No prediction yet">
+                                <div class="spike-progress-bar" id="spike-progress-bar-gd" title="No prediction yet"></div>
+                            </div>
+                            <span class="spike-timer" id="spike-timer-gd">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="connection-status">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">...</span>
+                <input type="file" id="report-file" class="report-file-input" accept=".csv" title="Open CSV">
+                <button class="mode-btn" id="mode-btn" onclick="toggleMode()">RPT</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Warning overlay for predicted spikes -->
+    <div class="warning-overlay" id="warning-overlay"></div>
+
+    <script>
+        const MAX_DATA_POINTS = 1800; // Show last 30 minutes (1800 seconds)
+        const SPIKE_THRESHOLD = 50; // ms - anything above this is a spike
+        const WARNING_TIME = 30; // seconds - warn this many seconds before predicted spike
+        const SPIKE_HISTORY_WINDOW = 1800; // Only consider spikes within last 30 minutes (seconds)
+
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+
+        // Elements for Gateway tracker
+        const spikeTimerGw = document.getElementById('spike-timer-gw');
+        const spikeProgressBarGw = document.getElementById('spike-progress-bar-gw');
+
+        // Elements for First Hop tracker
+        const spikeTimerFh = document.getElementById('spike-timer-fh');
+        const spikeProgressBarFh = document.getElementById('spike-progress-bar-fh');
+
+        // Elements for Google DNS tracker
+        const spikeTimerGd = document.getElementById('spike-timer-gd');
+        const spikeProgressBarGd = document.getElementById('spike-progress-bar-gd');
+
+        const warningOverlay = document.getElementById('warning-overlay');
+
+        // Data storage
+        const chartData = {
+            labels: [],
+            gateway: [],
+            firstHop: [],
+            googleDns: []
+        };
+
+        // Spike tracking - separate for each target
+        const spikeTrackers = {
+            gateway: {
+                history: [],
+                lastSpikeTime: null,
+                predictedInterval: null,
+                startTime: null,
+                baseline: [],
+                inSpike: false,
+                spikeStartTime: null
+            },
+            firstHop: {
+                history: [],
+                lastSpikeTime: null,
+                predictedInterval: null,
+                startTime: null,
+                baseline: [],
+                inSpike: false,
+                spikeStartTime: null
+            },
+            googleDns: {
+                history: [],
+                lastSpikeTime: null,
+                predictedInterval: null,
+                startTime: null,
+                baseline: [],
+                inSpike: false,
+                spikeStartTime: null
+            }
+        };
+        let globalStartTime = null;
+
+        // Chart configuration
+        const ctx = document.getElementById('latencyChart').getContext('2d');
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: chartData.labels,
+                datasets: [
+                    {
+                        label: 'Gateway',
+                        data: chartData.gateway,
+                        borderColor: '#2196F3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        fill: true
+                    },
+                    {
+                        label: 'First Hop',
+                        data: chartData.firstHop,
+                        borderColor: '#4CAF50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        fill: true
+                    },
+                    {
+                        label: 'Google DNS',
+                        data: chartData.googleDns,
+                        borderColor: '#FF9800',
+                        backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                        borderWidth: 2,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 0 // Disable animation for real-time feel
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        ticks: {
+                            color: '#888',
+                            font: { size: 9 },
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: 6
+                        }
+                    },
+                    y: {
+                        display: true,
+                        beginAtZero: true,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.1)'
+                        },
+                        ticks: {
+                            color: '#888',
+                            font: { size: 9 },
+                            callback: function(value) {
+                                return value + 'ms';
+                            }
+                        },
+                        suggestedMax: 100
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                        titleColor: '#fff',
+                        bodyColor: '#fff',
+                        borderColor: 'rgba(255, 255, 255, 0.2)',
+                        borderWidth: 1,
+                        padding: 8,
+                        displayColors: true,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += Math.round(context.parsed.y) + 'ms';
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    axis: 'x',
+                    intersect: false
+                }
+            }
+        });
+
+        function cleanOldSpikes(tracker) {
+            // Remove spikes older than SPIKE_HISTORY_WINDOW (30 minutes)
+            const now = Date.now() / 1000;
+            if (!globalStartTime) return;
+
+            const elapsedSinceStart = now - globalStartTime;
+            const cutoffTime = elapsedSinceStart - SPIKE_HISTORY_WINDOW;
+
+            // Only clean if we've been running longer than the history window
+            // Otherwise cutoffTime is negative and would delete everything!
+            if (cutoffTime > 0) {
+                // Filter out spikes older than 30 minutes
+                while (tracker.history.length > 0 && tracker.history[0] < cutoffTime) {
+                    tracker.history.shift();
+                }
+
+                // Update lastSpikeTime if history was cleared
+                if (tracker.history.length > 0) {
+                    tracker.lastSpikeTime = tracker.history[tracker.history.length - 1];
+                } else {
+                    tracker.lastSpikeTime = null;
+                    tracker.predictedInterval = null;
+                }
+            }
+        }
+
+        function detectSpike(gateway, firstHop, googleDns) {
+            // Initialize global start time on first call
+            if (!globalStartTime) {
+                globalStartTime = Date.now() / 1000;
+            }
+
+            const now = Date.now() / 1000;
+            const elapsedTime = now - globalStartTime;
+
+            // Check each target independently
+            detectSpikeForTarget('gateway', gateway, elapsedTime);
+            detectSpikeForTarget('firstHop', firstHop, elapsedTime);
+            detectSpikeForTarget('googleDns', googleDns, elapsedTime);
+        }
+
+        function detectSpikeForTarget(targetName, latency, elapsedTime) {
+            const tracker = spikeTrackers[targetName];
+
+            // Skip if latency is null/undefined
+            if (latency == null) return;
+
+            // Build baseline from recent non-spike values (keep last 50 readings)
+            const MAX_BASELINE_SIZE = 50;
+
+            // Calculate current baseline (median of recent baseline values)
+            let baselineValue = 20; // Default baseline
+            if (tracker.baseline.length > 10) {
+                const sorted = [...tracker.baseline].sort((a, b) => a - b);
+                const mid = Math.floor(sorted.length / 2);
+                baselineValue = sorted.length % 2 === 0
+                    ? (sorted[mid - 1] + sorted[mid]) / 2
+                    : sorted[mid];
+            }
+
+            // Spike detection: latency must be BOTH significantly above baseline AND above absolute threshold
+            // This prevents small fluctuations from being detected as spikes
+            const relativeThreshold = baselineValue * 10; // 10x baseline for very high spikes only
+            const absoluteThreshold = 200; // Minimum 200ms to be considered a spike (catch only severe spikes)
+            const isHighLatency = latency > Math.max(relativeThreshold, absoluteThreshold);
+
+            if (isHighLatency && !tracker.inSpike) {
+                // Start of a new spike event
+                tracker.inSpike = true;
+                tracker.spikeStartTime = elapsedTime;
+
+                // Clean old spikes first
+                cleanOldSpikes(tracker);
+
+                // Record this spike
+                tracker.history.push(elapsedTime);
+                tracker.lastSpikeTime = elapsedTime;
+
+                const spikeThreshold = Math.max(relativeThreshold, absoluteThreshold);
+                console.log(`${targetName} spike detected! Latency: ${latency}ms (baseline: ${baselineValue.toFixed(1)}ms, threshold: ${spikeThreshold.toFixed(1)}ms), Total spikes: ${tracker.history.length}, Spike times: [${tracker.history.map(t => Math.floor(t)).join(', ')}]`);
+
+                // Calculate interval if we have at least 2 spikes
+                if (tracker.history.length >= 2) {
+                    calculatePredictedInterval(targetName, tracker);
+                }
+            } else if (!isHighLatency && tracker.inSpike) {
+                // End of spike - back to normal
+                tracker.inSpike = false;
+                console.log(`${targetName} spike ended. Back to baseline: ${latency}ms`);
+            } else if (!isHighLatency) {
+                // Normal reading - update baseline
+                tracker.baseline.push(latency);
+                if (tracker.baseline.length > MAX_BASELINE_SIZE) {
+                    tracker.baseline.shift(); // Remove oldest
+                }
+            }
+        }
+
+        function calculatePredictedInterval(targetName, tracker) {
+            // Calculate intervals between consecutive spikes
+            const intervals = [];
+            for (let i = 1; i < tracker.history.length; i++) {
+                intervals.push(tracker.history[i] - tracker.history[i - 1]);
+            }
+
+            // Use average of recent intervals (last 5 or all if less)
+            const recentIntervals = intervals.slice(-5);
+            const avgInterval = recentIntervals.reduce((a, b) => a + b, 0) / recentIntervals.length;
+
+            // If we only have 2 spikes, just use that single interval
+            if (tracker.history.length === 2) {
+                tracker.predictedInterval = avgInterval;
+                console.log(`${targetName} prediction started! Interval: ${Math.floor(avgInterval)}s between spikes`);
+                return;
+            }
+
+            // For 3+ spikes, check consistency
+            const variance = recentIntervals.reduce((sum, val) => {
+                return sum + Math.pow(val - avgInterval, 2);
+            }, 0) / recentIntervals.length;
+
+            const stdDev = Math.sqrt(variance);
+
+            // If standard deviation is less than 50% of average, pattern is consistent enough
+            // (Relaxed from 30% to handle slight variations in ISP maintenance timing)
+            if (stdDev / avgInterval < 0.5) {
+                tracker.predictedInterval = avgInterval;
+                console.log(`${targetName} pattern consistent! Predicted interval: ${Math.floor(avgInterval)}s (stdDev: ${Math.floor(stdDev)}s)`);
+            } else {
+                // Even if inconsistent, still use average if we have 3+ spikes for better UX
+                tracker.predictedInterval = avgInterval;
+                console.log(`${targetName} pattern variable but using average. Avg: ${Math.floor(avgInterval)}s, StdDev: ${Math.floor(stdDev)}s`);
+            }
+        }
+
+        function updateSpikeTimerForTarget(tracker, timerElement, progressBarElement) {
+            if (!globalStartTime || !tracker.lastSpikeTime) {
+                timerElement.textContent = '--';
+                timerElement.className = 'spike-timer';
+                progressBarElement.style.width = '0%';
+                progressBarElement.className = 'spike-progress-bar';
+                progressBarElement.title = 'No prediction yet';
+                progressBarElement.parentElement.title = 'No prediction yet';
+                return false; // Not in warning state
+            }
+
+            // Debug: log spike history length
+            if (tracker.history && tracker.history.length > 0 && Math.random() < 0.01) { // Log 1% of the time to avoid spam
+                console.log('Spike history:', tracker.history.length, 'spikes, predictedInterval:', tracker.predictedInterval);
+            }
+
+            const now = Date.now() / 1000;
+            const elapsedSinceStart = now - globalStartTime;
+            const timeSinceLastSpike = elapsedSinceStart - tracker.lastSpikeTime;
+
+            // Format time since last spike
+            const minutes = Math.floor(timeSinceLastSpike / 60);
+            const seconds = Math.floor(timeSinceLastSpike % 60);
+            const timeStr = minutes > 0
+                ? `${minutes}m${seconds}s`
+                : `${seconds}s`;
+
+            // Update progress bar
+            if (tracker.predictedInterval) {
+                const progressPercent = Math.min((timeSinceLastSpike / tracker.predictedInterval) * 100, 100);
+                progressBarElement.style.width = `${Math.max(progressPercent, 2)}%`; // Minimum 2% visibility
+
+                const timeUntilNextSpike = tracker.predictedInterval - timeSinceLastSpike;
+
+                // Create tooltip text
+                const intervalMinutes = Math.floor(tracker.predictedInterval / 60);
+                const intervalSeconds = Math.floor(tracker.predictedInterval % 60);
+                const intervalStr = intervalMinutes > 0
+                    ? `${intervalMinutes}m${intervalSeconds}s`
+                    : `${intervalSeconds}s`;
+
+                const tooltipText = `Progress: ${progressPercent.toFixed(1)}% | Predicted Interval: ${intervalStr}`;
+                progressBarElement.title = tooltipText;
+                progressBarElement.parentElement.title = tooltipText;
+
+                if (timeUntilNextSpike <= WARNING_TIME && timeUntilNextSpike > 0) {
+                    // Show warning! (Red pulsing)
+                    const warnSeconds = Math.floor(timeUntilNextSpike);
+                    timerElement.textContent = `⚠${warnSeconds}s`;
+                    timerElement.className = 'spike-timer warning';
+                    progressBarElement.className = 'spike-progress-bar warning';
+                    return true; // In warning state
+                } else if (progressPercent >= 70) {
+                    // Getting close (Orange)
+                    timerElement.textContent = timeStr;
+                    timerElement.className = 'spike-timer';
+                    progressBarElement.className = 'spike-progress-bar approaching';
+                } else {
+                    // Still safe (Green)
+                    timerElement.textContent = timeStr;
+                    timerElement.className = 'spike-timer';
+                    progressBarElement.className = 'spike-progress-bar';
+                }
+            } else {
+                // No prediction yet, but show time since spike with a small bar
+                timerElement.textContent = timeStr;
+                timerElement.className = 'spike-timer';
+                progressBarElement.style.width = '5%'; // Small indicator
+                progressBarElement.className = 'spike-progress-bar';
+                const tooltipText = `Waiting for pattern (need 2+ spikes) | Time since last: ${timeStr}`;
+                progressBarElement.title = tooltipText;
+                progressBarElement.parentElement.title = tooltipText;
+            }
+            return false; // Not in warning state
+        }
+
+        function updateAllSpikeTimers() {
+            // Update all three trackers
+            const gwWarning = updateSpikeTimerForTarget(spikeTrackers.gateway, spikeTimerGw, spikeProgressBarGw);
+            const fhWarning = updateSpikeTimerForTarget(spikeTrackers.firstHop, spikeTimerFh, spikeProgressBarFh);
+            const gdWarning = updateSpikeTimerForTarget(spikeTrackers.googleDns, spikeTimerGd, spikeProgressBarGd);
+
+            // Show warning overlay if ANY tracker is in warning state
+            if (gwWarning || fhWarning || gdWarning) {
+                warningOverlay.className = 'warning-overlay active';
+            } else {
+                warningOverlay.className = 'warning-overlay';
+            }
+        }
+
+        function addDataPoint(timestamp, gateway, firstHop, googleDns) {
+            // Detect spikes
+            detectSpike(gateway, firstHop, googleDns);
+            // Add new data
+            chartData.labels.push(timestamp);
+            chartData.gateway.push(gateway);
+            chartData.firstHop.push(firstHop);
+            chartData.googleDns.push(googleDns);
+
+            // Remove old data if we have too many points
+            if (chartData.labels.length > MAX_DATA_POINTS) {
+                chartData.labels.shift();
+                chartData.gateway.shift();
+                chartData.firstHop.shift();
+                chartData.googleDns.shift();
+            }
+
+            // Update chart
+            chart.update('none'); // Use 'none' mode for no animation
+        }
+
+        function updateStats(gateway, firstHop, googleDns) {
+            function formatAndColor(value, elementId) {
+                const el = document.getElementById(elementId);
+                if (value === null || value === undefined) {
+                    el.textContent = '--';
+                    el.className = 'stat-value';
+                    return;
+                }
+
+                const ms = Math.round(value);
+                el.textContent = ms + 'ms';
+
+                if (ms > 100) {
+                    el.className = 'stat-value critical';
+                } else if (ms > 50) {
+                    el.className = 'stat-value warning';
+                } else {
+                    el.className = 'stat-value good';
+                }
+            }
+
+            formatAndColor(gateway, 'gw-stat');
+            formatAndColor(firstHop, 'fh-stat');
+            formatAndColor(googleDns, 'gd-stat');
+        }
+
+        // WebSocket connection
+        let ws = null;
+        let reconnectInterval = null;
+
+        function connect() {
+            ws = new WebSocket('ws://localhost:8765/ws');
+
+            ws.onopen = () => {
+                console.log('Connected to network monitor');
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Live';
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.type === 'history') {
+                        // Batch-load session history — skip spike detection, one chart update at end
+                        const rows = data.rows.slice(-MAX_DATA_POINTS);
+                        rows.forEach(row => {
+                            chartData.labels.push(row.timestamp);
+                            chartData.gateway.push(row.gateway.avg_ms);
+                            chartData.firstHop.push(row.first_hop.avg_ms);
+                            chartData.googleDns.push(row.google_dns.avg_ms);
+                        });
+                        chart.update('none');
+                        if (rows.length > 0) {
+                            const last = rows[rows.length - 1];
+                            updateStats(last.gateway.avg_ms, last.first_hop.avg_ms, last.google_dns.avg_ms);
+                        }
+                        return;
+                    }
+
+                    addDataPoint(
+                        data.timestamp,
+                        data.gateway.avg_ms,
+                        data.first_hop.avg_ms,
+                        data.google_dns.avg_ms
+                    );
+
+                    updateStats(
+                        data.gateway.avg_ms,
+                        data.first_hop.avg_ms,
+                        data.google_dns.avg_ms
+                    );
+                } catch (error) {
+                    console.error('Error parsing data:', error);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+
+            ws.onclose = () => {
+                console.log('Disconnected from network monitor');
+                statusDot.className = 'status-dot disconnected';
+                statusText.textContent = 'Offline';
+
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(() => {
+                        console.log('Attempting to reconnect...');
+                        connect();
+                    }, 3000);
+                }
+            };
+        }
+
+        // ── Report mode ──────────────────────────────────────────────────────────
+        let currentMode = 'live';
+
+        function toggleMode() {
+            currentMode = currentMode === 'live' ? 'report' : 'live';
+            const btn = document.getElementById('mode-btn');
+            const fileInput = document.getElementById('report-file');
+            const spikeRows = document.querySelectorAll('.spike-tracker-compact');
+
+            if (currentMode === 'report') {
+                btn.textContent = 'LIVE';
+                btn.classList.add('report');
+                fileInput.style.display = 'inline';
+                statusDot.style.display = 'none';
+                statusText.style.display = 'none';
+                spikeRows.forEach(el => el.style.display = 'none');
+                if (reconnectInterval) { clearInterval(reconnectInterval); reconnectInterval = null; }
+                if (ws) ws.close();
+            } else {
+                btn.textContent = 'RPT';
+                btn.classList.remove('report');
+                fileInput.style.display = 'none';
+                statusDot.style.display = '';
+                statusText.style.display = '';
+                spikeRows.forEach(el => el.style.display = '');
+                clearChartData();
+                ['gw-stat','fh-stat','gd-stat'].forEach(id => {
+                    const el = document.getElementById(id);
+                    el.textContent = '--';
+                    el.className = 'stat-value';
+                });
+                connect();
+            }
+        }
+
+        function clearChartData() {
+            chartData.labels.length = 0;
+            chartData.gateway.length = 0;
+            chartData.firstHop.length = 0;
+            chartData.googleDns.length = 0;
+            chart.update('none');
+        }
+
+        document.getElementById('report-file').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            loadReportCSV(await file.text(), file.name);
+        });
+
+        function loadReportCSV(text, filename) {
+            clearChartData();
+            const lines = text.trim().split('\n');
+            if (lines.length < 2) return;
+
+            const dataLines = lines.slice(1);
+            dataLines.forEach(line => {
+                const r = line.split(',');
+                chartData.labels.push(r[0]);
+                chartData.gateway.push(r[1] === '' || r[1] === 'None' ? null : parseFloat(r[1]));
+                chartData.firstHop.push(r[4] === '' || r[4] === 'None' ? null : parseFloat(r[4]));
+                chartData.googleDns.push(r[7] === '' || r[7] === 'None' ? null : parseFloat(r[7]));
+            });
+            chart.update('none');
+
+            // Summary stats
+            function targetStats(avgIdx, lossIdx) {
+                const vals = [], losses = [];
+                dataLines.forEach(line => {
+                    const r = line.split(',');
+                    if (r[avgIdx] && r[avgIdx] !== 'None') vals.push(parseFloat(r[avgIdx]));
+                    losses.push(parseFloat(r[lossIdx]) || 0);
+                });
+                const avg = vals.length ? vals.reduce((a,b) => a+b, 0) / vals.length : 0;
+                const loss = losses.reduce((a,b) => a+b, 0) / losses.length;
+                return {avg, loss};
+            }
+            const gw = targetStats(1, 2), fh = targetStats(4, 5), gd = targetStats(7, 8);
+            function setStatEl(id, avg, loss) {
+                const el = document.getElementById(id);
+                el.textContent = Math.round(avg) + 'ms' + (loss > 0 ? ' ' + loss.toFixed(1) + '%loss' : '');
+                el.className = 'stat-value ' + (avg > 100 ? 'critical' : avg > 50 ? 'warning' : 'good');
+            }
+            setStatEl('gw-stat', gw.avg, gw.loss);
+            setStatEl('fh-stat', fh.avg, fh.loss);
+            setStatEl('gd-stat', gd.avg, gd.loss);
+            statusText.style.display = 'block';
+            statusText.textContent = filename;
+        }
+        // ─────────────────────────────────────────────────────────────────────────
+
+        // Update all spike timers every second
+        setInterval(updateAllSpikeTimers, 1000);
+
+        // Connect on load
+        connect();
+    </script>
+</body>
+</html>

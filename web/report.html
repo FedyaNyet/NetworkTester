@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Network Test Report Viewer</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header { text-align: center; margin-bottom: 30px; }
+        .file-selector { margin-bottom: 20px; text-align: center; }
+        .chart-container { height: 600px; border: 1px solid #ddd; border-radius: 4px; }
+        .stats { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 4px; }
+        .loading { text-align: center; padding: 40px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Network Latency & Packet Loss Report</h1>
+        </div>
+        <div class="file-selector">
+            <label for="csv-file">Open CSV from runs/ folder: </label>
+            <input type="file" id="csv-file" accept=".csv">
+        </div>
+        <div id="chart-container" class="chart-container"></div>
+        <div id="stats" class="stats" style="display: none;">
+            <h3>Statistics</h3>
+            <div id="stats-content"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('csv-file').addEventListener('change', async function(e) {
+            const file = e.target.files[0];
+            if (file) renderCSV(await file.text(), file.name);
+        });
+
+        function renderCSV(text, sourceName) {
+            const chartContainer = document.getElementById('chart-container');
+            const statsDiv = document.getElementById('stats');
+            try {
+                const lines = text.trim().split('\n');
+                if (lines.length < 2) {
+                    chartContainer.innerHTML = '<div class="loading">No data in this file</div>';
+                    return;
+                }
+                const times = [], gw_avg = [], gw_loss = [], fh_avg = [], fh_loss = [], gd_avg = [], gd_loss = [];
+                lines.slice(1).forEach(line => {
+                    const r = line.split(',');
+                    times.push(r[0]);
+                    gw_avg.push(r[1] === '' || r[1] === 'None' ? null : parseFloat(r[1]));
+                    gw_loss.push(parseFloat(r[2]) || 0);
+                    fh_avg.push(r[4] === '' || r[4] === 'None' ? null : parseFloat(r[4]));
+                    fh_loss.push(parseFloat(r[5]) || 0);
+                    gd_avg.push(r[7] === '' || r[7] === 'None' ? null : parseFloat(r[7]));
+                    gd_loss.push(parseFloat(r[8]) || 0);
+                });
+                const traces = [
+                    {x: times, y: gw_avg, mode: 'markers+lines', name: 'Gateway',   marker: {color: gw_loss.map(l => l > 0 ? 'red' : 'blue'),   size: 6}},
+                    {x: times, y: fh_avg, mode: 'markers+lines', name: 'First Hop', marker: {color: fh_loss.map(l => l > 0 ? 'red' : 'green'),  size: 6}},
+                    {x: times, y: gd_avg, mode: 'markers+lines', name: 'Google DNS',marker: {color: gd_loss.map(l => l > 0 ? 'red' : 'orange'), size: 6}}
+                ];
+                Plotly.newPlot('chart-container', traces, {title: sourceName, xaxis: {title: 'Time'}, yaxis: {title: 'Latency (ms)'}, hovermode: 'x unified'});
+                const s = calcStats(gw_avg, fh_avg, gd_avg, gw_loss, fh_loss, gd_loss);
+                document.getElementById('stats-content').innerHTML = `
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:15px">
+                        <div><strong>Gateway</strong><br>Avg: ${s.gw.avg.toFixed(1)}ms | Loss: ${s.gw.loss.toFixed(1)}% | Jitter: ${s.gw.jitter.toFixed(1)}ms</div>
+                        <div><strong>First Hop</strong><br>Avg: ${s.fh.avg.toFixed(1)}ms | Loss: ${s.fh.loss.toFixed(1)}% | Jitter: ${s.fh.jitter.toFixed(1)}ms</div>
+                        <div><strong>Google DNS</strong><br>Avg: ${s.gd.avg.toFixed(1)}ms | Loss: ${s.gd.loss.toFixed(1)}% | Jitter: ${s.gd.jitter.toFixed(1)}ms</div>
+                        <div><strong>Duration</strong><br>${times.length} samples<br>${times[0]} – ${times[times.length - 1]}</div>
+                    </div>`;
+                statsDiv.style.display = 'block';
+            } catch (err) {
+                chartContainer.innerHTML = '<div class="loading">Error: ' + err.message + '</div>';
+            }
+        }
+
+        function calcStats(gw_avg, fh_avg, gd_avg, gw_loss, fh_loss, gd_loss) {
+            const v = arr => arr.filter(x => x !== null && !isNaN(x));
+            const avg = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+            const jitter = arr => {
+                if (arr.length < 2) return 0;
+                let s = 0;
+                for (let i = 1; i < arr.length; i++) s += Math.abs(arr[i] - arr[i - 1]);
+                return s / (arr.length - 1);
+            };
+            return {
+                gw: {avg: avg(v(gw_avg)), loss: avg(gw_loss), jitter: jitter(v(gw_avg))},
+                fh: {avg: avg(v(fh_avg)), loss: avg(fh_loss), jitter: jitter(v(fh_avg))},
+                gd: {avg: avg(v(gd_avg)), loss: avg(gd_loss), jitter: jitter(v(gd_avg))}
+            };
+        }
+    </script>
+</body>
+</html>

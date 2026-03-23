@@ -1,100 +1,102 @@
 # NetworkTester
 
-Measure latency, jitter, and packet loss to three targets (gateway, first hop, and Google DNS) on Windows. Logs results to a CSV and generates an interactive HTML report.
+Monitors network latency, jitter, and packet loss to three targets (local gateway, ISP first hop, Google DNS 8.8.8.8) on Windows. Logs results to timestamped CSVs and serves a live widget for real-time monitoring.
 
-- Script: `network_test.py`
-- Outputs: `network_test.csv`, `network_report.html`
 - Platform: Windows (uses `ping`, `ipconfig`, `tracert`)
+- All data saved to `runs/<timestamp>.csv`
 
 ## Prerequisites
-- Windows PowerShell
-- [uv](https://github.com/astral-sh/uv) installed (manages Python and venv automatically)
-- ICMP not blocked by firewall (so `ping` works)
 
-## Quick start (recommended: uv-managed)
-If this project already contains `pyproject.toml` and `uv.lock` (committed):
+- Windows 10/11
+- [uv](https://github.com/astral-sh/uv) installed
+
+## Quick start
 
 ```powershell
-# from the project folder
 uv sync
-uv run python .\network_test.py
+uv run python network_test.py
 ```
 
-If starting fresh (no `pyproject.toml` yet):
+Or double-click `scripts/launch_monitor.bat`.
+
+## Commands
+
+### Run the monitor
 
 ```powershell
-# initialize a project and add dependencies
-uv init
-uv add plotly
-uv sync
-
-# run without activating the venv
-uv run python .\network_test.py
+uv run -m netmon.monitor
 ```
 
-Optional: activate the venv explicitly
+Starts logging to `runs/<timestamp>.csv` and serves the live widget at `http://localhost:8765/`.
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--duration` | 3600 | Total run time in seconds |
+| `--interval` | 0 | Seconds to sleep between cycles |
+| `--count` | 2 | Pings per cycle (affects jitter accuracy) |
+| `--timeout-ms` | — | Ping timeout per echo in ms |
+| `--packet-size` | — | ICMP payload size in bytes |
+| `--df` | off | Set Don't Fragment flag |
+| `--port` | 8765 | WebSocket server port |
+
+Stop early with **Ctrl+C** — the CSV is preserved.
+
+### Analyze results
+
 ```powershell
-.\.venv\Scripts\Activate.ps1
-python .\network_test.py
-# when done
-deactivate
+uv run -m netmon.analyze
 ```
 
-## What the script does
-- Discovers your default gateway and first hop automatically using `ipconfig` and `tracert`.
-- Pings each target in cycles and writes per-cycle stats to CSV:
-  - average latency (ms)
-  - packet loss (%)
-  - jitter (population std dev, ms)
-- Generates `network_report.html` with Plotly showing latency over time and coloring points when loss occurs.
+Reads the most recent CSV in `runs/` and prints:
+- Per-host summary (RTT min/med/avg/p95/p99/max, jitter, loss)
+- Spike event table (events where first hop > 100ms, with timestamps and peak values)
+- Inter-event interval analysis (mean, median, std dev — useful for identifying periodic patterns)
 
-Default runtime is 1 hour. Adjust these constants at the top of `network_test.py`:
-- `TEST_DURATION_SECONDS` (default 3600)
-- `PING_COUNT_PER_CYCLE` (default 3)
-- `SLEEP_BETWEEN_CYCLES` (seconds between cycles)
+## Live widget
 
-Stop early with Ctrl+C. Partial results are preserved in the CSV; the HTML report is generated at the end of a full run.
+Open `http://localhost:8765/` in a browser while the monitor is running. Shows a live scrolling latency chart with the full current session history loaded on connect.
+
+**RPT mode:** click the `RPT` button in the widget to load a historical CSV file instead of the live feed.
+
+See [GAMEBAR_SETUP.md](GAMEBAR_SETUP.md) for pinning the widget as an always-on-top overlay.
+
+## Viewing historical results
+
+Open `web/report.html` in a browser and use the file picker to select any CSV from the `runs/` folder. Renders an interactive Plotly chart with statistics.
 
 ## Outputs
-- `network_test.csv` — raw per-cycle metrics (time, avg, loss, jitter for each target)
-- `network_report.html` — interactive chart; open it in your browser
 
-## Dependency manifest options
-- uv-managed (recommended): keep `pyproject.toml` and `uv.lock` under version control. Recreate the environment anywhere with:
-  ```powershell
-  uv sync
-  ```
-- Classic `requirements.txt` (optional):
-  ```powershell
-  uv pip freeze > requirements.txt
-  # later
-  uv pip install -r requirements.txt
-  ```
+- `runs/<timestamp>.csv` — raw per-cycle metrics for each target
+- `runs/.gitignore` — excludes CSVs from version control; the folder structure is tracked
 
-Current third-party deps used by the script:
-- `plotly`
+## Tuning constants
 
-## Docker note
-A `Dockerfile` is included, but `network_test.py` calls Windows tools (`ping`, `ipconfig`, `tracert`). The provided base image (`python:3.12-slim`) is Linux, so the script will not run correctly inside that container as-is. To containerize you can either:
-- Switch to Windows containers and use a Windows base image with Python, or
-- Make the script cross-platform (use Linux equivalents like `ping -c`, `ip route`, `traceroute`).
+At the top of `netmon/monitor.py`:
+
+```python
+TEST_DURATION_SECONDS = 3600   # default run length
+PING_COUNT_PER_CYCLE  = 2      # pings per cycle (min 2 for jitter)
+SLEEP_BETWEEN_CYCLES  = 0      # extra delay between cycles
+```
 
 ## Troubleshooting
-- Gateway/first hop show as `None`:
-  - Ensure the machine has an active network connection.
-  - Run `ipconfig` and `tracert -d 8.8.8.8` manually to confirm outputs.
-  - As a workaround, hardcode targets near the top of `network_test.py`.
-- `ModuleNotFoundError: plotly`: run `uv add plotly` (or `uv pip install plotly`).
-- Ping blocked by policy: allow ICMP Echo in your firewall settings or run on a network that permits ping.
 
-## Housekeeping
-- Update dependencies:
-  ```powershell
-  uv lock --upgrade
-  uv sync
-  ```
-- Reset the environment from scratch:
-  ```powershell
-  Remove-Item -Recurse -Force .\.venv
-  uv sync
-  ```
+- **Gateway/first hop show as `None`:** run `ipconfig` and `tracert -d 8.8.8.8` manually to confirm your network is active. As a workaround, hardcode the targets near the top of `network_test.py`.
+- **Widget shows "Connecting...":** make sure `network_test.py` is running and port 8765 is not blocked by your firewall.
+- **`ModuleNotFoundError`:** run `uv sync` to install dependencies.
+- **Ping blocked:** allow ICMP Echo in Windows Firewall or run on a network that permits ping.
+
+## Dependency management
+
+```powershell
+# Recreate environment
+uv sync
+
+# Upgrade all deps
+uv lock --upgrade && uv sync
+
+# Reset from scratch
+Remove-Item -Recurse -Force .\.venv && uv sync
+```

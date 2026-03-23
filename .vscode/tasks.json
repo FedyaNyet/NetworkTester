@@ -2,41 +2,41 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
-			"label": "NetworkTester: Smoke run (.venv)",
+			"label": "netmon: Smoke run (10s)",
 			"type": "shell",
-			"command": ".\\.venv\\Scripts\\python.exe",
+			"command": "uv",
 			"args": [
-				".\\network_test.py",
-				"--duration",
-				"10",
-				"--interval",
-				"0.5",
-				"--count",
-				"2",
-				"--timeout-ms",
-				"200"
+				"run", "-m", "netmon.monitor",
+				"--duration", "10",
+				"--interval", "0.5",
+				"--count", "2",
+				"--timeout-ms", "200"
 			],
 			"group": "test",
 			"isBackground": false,
 			"problemMatcher": []
 		},
 		{
-			"label": "NetworkTester: 1h run (.venv)",
+			"label": "netmon: 1h run",
 			"type": "shell",
-			"command": ".\\.venv\\Scripts\\python.exe",
+			"command": "uv",
 			"args": [
-				".\\network_test.py",
-				"--duration",
-				"3600",
-				"--interval",
-				"0.2",
-				"--count",
-				"1",
-				"--timeout-ms",
-				"200"
+				"run", "-m", "netmon.monitor",
+				"--duration", "3600"
 			],
 			"group": "test",
 			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "netmon: Analyze latest",
+			"type": "shell",
+			"command": "uv",
+			"args": [
+				"run", "-m", "netmon.analyze"
+			],
+			"group": "test",
+			"isBackground": false,
 			"problemMatcher": []
 		}
 	]
