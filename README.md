@@ -2,6 +2,13 @@
 
 Monitors network latency, jitter, and packet loss to three targets (local gateway, ISP first hop, Google DNS 8.8.8.8) on Windows. Logs results to timestamped CSVs and serves a live widget for real-time monitoring.
 
+Widget View:
+<img width="1909" height="1054" alt="image" src="https://github.com/user-attachments/assets/aef20d76-1186-433a-b9f7-4b16c5c96f6a" />
+
+Result View:
+<img width="1878" height="1424" alt="image" src="https://github.com/user-attachments/assets/481ac020-ea5a-4030-825e-06e2f19ce7ab" />
+
+
 - Platform: Windows (uses `ping`, `ipconfig`, `tracert`)
 - All data saved to `runs/<timestamp>.csv`
 
